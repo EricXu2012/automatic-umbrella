@@ -44,6 +44,9 @@
   const MAX_STINGERS = 3;
   const STINGER_LIFETIME = 3200;
 
+  // Obstacles
+  const SPAWN_OBSTACLE_MS = 1400;
+
   // Colors
   const BG = '#87CEEB';
   const BEE_YELLOW = '#FFC800';
@@ -112,7 +115,21 @@
     }
   }
 
-  // Entities: Bee, Flower, Bird, Stinger
+  // helper: draw a wing as rotated ellipse-like polygon; when mirror=true, flip horizontally
+  function drawWing(ctx, baseX, baseY, angleDeg, w, h, mirror=false){
+    ctx.save();
+    ctx.translate(baseX, baseY);
+    ctx.rotate(angleDeg * Math.PI/180);
+    if (mirror) ctx.scale(-1,1);
+    ctx.fillStyle = WING_FILL;
+    ctx.beginPath();
+    ctx.ellipse(0,0,w/2,h/2,0,0,Math.PI*2);
+    ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = WING_OUTLINE; ctx.stroke();
+    ctx.restore();
+  }
+
+  // Entities: Bee, Flower, Bird, Stinger, Obstacle
   class Bee {
     constructor(){ this.x=120; this.y=HEIGHT/2; this.vy=0; this.r=18; this.wingPhase=Math.random()*Math.PI*2; this.wingSpeed=0.03; this.lastShot=-9999; }
     flap(){ this.vy = FLAP_STRENGTH; spawnBurst(this.x-6,this.y+this.r/2,6); playTone(880,'sine',0.09,0.15); }
@@ -132,73 +149,71 @@
     }
     draw(ctx){
       const cx = this.x, cy = this.y;
-      // wings behind body: left & right, V shape, small flap
+      // wings (drawn behind body) - V shaped with visible attachment behind head
       const flap = Math.sin(this.wingPhase);
-      const maxAngle = 28;
-      const leftAngle = -maxAngle + flap*8;
-      const rightAngle = maxAngle - flap*8;
-      // draw left wing
-      drawWing(ctx, cx-6, cy-18, leftAngle, 24, 16);
-      drawWing(ctx, cx+10, cy-18, rightAngle, 24, 16, true);
+      const wingOpen = 14 + flap * 10; // degrees swing
+      const wingTilt = 14; // tilt from horizontal to create V
+      // left wing
+      drawWing(ctx, cx - 6, cy - 8, -wingTilt - wingOpen, 36, 22);
+      // right wing (mirror)
+      drawWing(ctx, cx + 6, cy - 8, wingTilt + wingOpen, 36, 22, true);
+
       // body
       ctx.fillStyle = BEE_YELLOW;
       ctx.beginPath(); ctx.arc(cx, cy, this.r, 0, Math.PI*2); ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = BEE_STRIPE; ctx.stroke();
-      // vertical stripes inside circle (3 thin)
-      const stripeW = 3, n=3;
-      const totalW = this.r*1.6;
-      const spacing = totalW/(n+1);
-      for(let i=0;i<n;i++){
-        const offset = (i - (n-1)/2)*spacing;
+
+      // vertical thin stripes (3)
+      const stripeW = 2;
+      for (let i = -1; i <= 1; i++){
+        const offset = i * (this.r * 0.55 / 1.5);
         const sx = cx + offset;
         const dx = sx - cx;
         if (Math.abs(dx) > this.r) continue;
-        const hh = Math.sqrt(Math.max(0,this.r*this.r - dx*dx));
+        const hh = Math.sqrt(Math.max(0, this.r*this.r - dx*dx));
         ctx.fillStyle = BEE_STRIPE;
-        ctx.beginPath();
-        ctx.rect(sx - stripeW/2, cy - hh, stripeW, hh*2);
-        ctx.fill();
+        ctx.fillRect(sx - stripeW/2, cy - hh, stripeW, hh*2);
       }
-      // head
-      const hr = this.r*0.65|0;
-      const hx = cx + this.r*0.9|0, hy = cy - (this.r*0.2|0);
-      ctx.fillStyle = BEE_YELLOW; ctx.beginPath(); ctx.arc(hx,hy,hr,0,Math.PI*2); ctx.fill();
-      ctx.lineWidth =2; ctx.strokeStyle=BEE_STRIPE; ctx.stroke();
-      // face: wink + eye + cheek + smile
-      ctx.strokeStyle = BEE_STRIPE; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.arc(hx-5, hy, 4, Math.PI*0.1, Math.PI*0.9); ctx.stroke(); // wink
-      ctx.fillStyle = BEE_STRIPE; ctx.beginPath(); ctx.arc(hx+6, hy-2, 3,0,Math.PI*2); ctx.fill(); // eye
-      ctx.fillStyle = CHEEK_PINK; ctx.beginPath(); ctx.arc(hx-6, hy+6, 4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(hx, hy+4, 6, Math.PI*0.15, Math.PI*0.85); ctx.stroke(); // smile
+
+      // head (slightly larger, positioned to look forward)
+      const hr = Math.max(8, (this.r * 0.68)|0);
+      const hx = cx + Math.round(this.r * 0.88);
+      const hy = cy - Math.round(this.r * 0.18);
+      ctx.fillStyle = BEE_YELLOW;
+      ctx.beginPath(); ctx.arc(hx, hy, hr, 0, Math.PI*2); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = BEE_STRIPE; ctx.stroke();
+
+      // face (wink + eye + cheek + smile)
+      // wink (left)
+      ctx.strokeStyle = BEE_STRIPE; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(hx - 10, hy);
+      ctx.lineTo(hx - 4, hy + 2);
+      ctx.stroke();
+      // eye (right)
+      ctx.fillStyle = BEE_STRIPE;
+      ctx.beginPath(); ctx.arc(hx + 6, hy - 2, 3, 0, Math.PI*2); ctx.fill();
+      // cheek
+      ctx.fillStyle = CHEEK_PINK; ctx.beginPath(); ctx.arc(hx - 8, hy + 6, 3.8, 0, Math.PI*2); ctx.fill();
+      // smile
+      ctx.beginPath(); ctx.arc(hx, hy + 4, 5, Math.PI*0.15, Math.PI*0.85); ctx.stroke();
+
       // antennae
-      ctx.strokeStyle = '#1E1E1E'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(hx-6, hy-hr+6); ctx.lineTo(hx-20, hy-hr-8); ctx.stroke();
-      ctx.beginPath(); ctx.arc(hx-20, hy-hr-8, 3,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(hx+6, hy-hr+6); ctx.lineTo(hx+20, hy-hr-8); ctx.stroke();
-      ctx.beginPath(); ctx.arc(hx+20, hy-hr-8, 3,0,Math.PI*2); ctx.fill();
-      // stinger tail
+      ctx.strokeStyle = '#1E1E1E'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(hx - 6, hy - hr + 4); ctx.lineTo(hx - 18, hy - hr - 10); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(hx + 6, hy - hr + 4); ctx.lineTo(hx + 18, hy - hr - 10); ctx.stroke();
+      ctx.fillStyle = '#1E1E1E';
+      ctx.beginPath(); ctx.arc(hx - 18, hy - hr - 10, 2.2, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(hx + 18, hy - hr - 10, 2.2, 0, Math.PI*2); ctx.fill();
+
+      // stinger (starts at rear of body)
       ctx.fillStyle = '#282828';
       ctx.beginPath();
-      ctx.moveTo(cx - this.r*1.1, cy);
-      ctx.lineTo(cx - this.r*0.2, cy - 6);
-      ctx.lineTo(cx - this.r*0.2, cy + 6);
+      ctx.moveTo(cx - this.r * 1.05, cy - 4);
+      ctx.lineTo(cx - this.r * 0.15, cy);
+      ctx.lineTo(cx - this.r * 1.05, cy + 4);
       ctx.closePath(); ctx.fill();
     }
-  }
-
-  // helper: draw a wing as rotated ellipse-like polygon; when mirror=true, flip horizontally
-  function drawWing(ctx, baseX, baseY, angleDeg, w, h, mirror=false){
-    ctx.save();
-    ctx.translate(baseX, baseY);
-    ctx.rotate(angleDeg * Math.PI/180);
-    if (mirror) ctx.scale(-1,1);
-    // draw elliptical wing using bezier
-    ctx.fillStyle = WING_FILL;
-    ctx.beginPath();
-    ctx.ellipse(0,0,w/2,h/2,0,0,Math.PI*2);
-    ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = WING_OUTLINE; ctx.stroke();
-    ctx.restore();
   }
 
   class Flower {
@@ -231,40 +246,102 @@
     }
     update(dt){ this.x -= this.speed; this.wingPhase += dt*0.02; this.rect.x = this.x; this.rect.y = this.y; }
     draw(ctx){
-      const bx = this.x|0, by = this.y|0, w=this.w, h=this.h;
+      const bx = this.x|0, by = this.y|0, w = this.w, h = this.h;
       const cx = bx + w/2, cy = by + h/2;
-      const bodyColor = 'rgb(200,100,40)';
-      ctx.fillStyle = bodyColor; ctx.beginPath(); ctx.ellipse(bx + w/2, by + h/2, w/2, h/2, 0,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle = 'rgb(220,160,90)'; ctx.beginPath(); ctx.ellipse(bx + w*0.15, by + h*0.15, w*0.35, h*0.35, 0,0,Math.PI*2); ctx.fill();
-      // head left
-      const headR = Math.floor(h*0.6);
-      const headX = bx + Math.floor(w*0.18), headY = cy - Math.floor(h*0.12);
-      ctx.fillStyle = 'rgb(220,170,90)'; ctx.beginPath(); ctx.arc(headX, headY, headR,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#141414'; ctx.beginPath(); ctx.arc(headX + headR*0.15, headY-2, Math.max(2, headR/4),0,Math.PI*2); ctx.fill();
-      ctx.fillStyle = 'rgb(180,120,30)'; ctx.beginPath(); ctx.moveTo(headX - headR - 4, headY); ctx.lineTo(headX - headR + 8, headY -6); ctx.lineTo(headX - headR + 8, headY +6); ctx.closePath(); ctx.fill();
-      // tail
-      ctx.fillStyle = 'rgb(160,80,30)'; ctx.beginPath(); ctx.moveTo(bx + w - 6, cy); ctx.lineTo(bx + w + 12, cy - 8); ctx.lineTo(bx + w + 12, cy + 8); ctx.closePath(); ctx.fill();
 
-      // wings as short & wide parallelograms rotated ~45 deg, inner edge contacting body behind head
-      const wingOff = Math.sin(this.wingPhase)*5;
-      const attachX = headX + headR + 4;
+      // body (elliptical)
+      ctx.fillStyle = 'rgb(200,100,40)';
+      ctx.beginPath(); ctx.ellipse(bx + w/2, by + h/2, w/2, h/2, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgb(220,160,90)';
+      ctx.beginPath(); ctx.ellipse(bx + Math.floor(w*0.16), by + Math.floor(h*0.14), w*0.34, h*0.34, 0, 0, Math.PI*2); ctx.fill();
+
+      // head
+      const headR = Math.floor(h * 0.62);
+      const headX = bx + Math.floor(w * 0.18);
+      const headY = cy - Math.floor(h * 0.12);
+      ctx.fillStyle = 'rgb(220,170,90)'; ctx.beginPath(); ctx.arc(headX, headY, headR, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#141414'; ctx.beginPath(); ctx.arc(headX + headR*0.14, headY - 2, Math.max(2, headR/4), 0, Math.PI*2); ctx.fill();
+
+      // beak
+      ctx.fillStyle = 'rgb(180,120,30)';
+      ctx.beginPath(); ctx.moveTo(headX - headR - 4, headY); ctx.lineTo(headX - headR + 8, headY - 6); ctx.lineTo(headX - headR + 8, headY + 6); ctx.closePath(); ctx.fill();
+
+      // tail
+      ctx.fillStyle = 'rgb(160,80,30)';
+      ctx.beginPath(); ctx.moveTo(bx + w - 6, cy); ctx.lineTo(bx + w + 12, cy - 8); ctx.lineTo(bx + w + 12, cy + 8); ctx.closePath(); ctx.fill();
+
+      // wings: short, wide parallelograms rotated ~45°, inner edge contacting body behind head
+      const wingOff = Math.sin(this.wingPhase) * 6;
+      const attachX = headX + headR + 2; // moved closer to head so wings touch
       const attachY = cy;
-      const wingLen = Math.floor(w * 0.45); // shorter
-      const wingTh = Math.floor(h * 0.6);   // wider
-      const angle = 45 * Math.PI/180;
-      const dx = Math.cos(angle)*wingLen |0, dy = Math.sin(angle)*wingLen |0;
+      const wingLen = Math.floor(w * 0.45);
+      const wingTh = Math.floor(h * 0.62);
+      // angle 45deg components
+      const angle = (45 * Math.PI/180);
+      const dx = Math.cos(angle) * wingLen;
+      const dy = Math.sin(angle) * wingLen;
+
+      // upper wing parallelogram
       ctx.fillStyle = 'rgb(170,80,30)';
-      ctx.strokeStyle = 'rgb(120,120,130)'; ctx.lineWidth = 2;
-      const u_inner_top = [attachX, attachY - (wingTh/2) - 4];
-      const u_inner_bot = [attachX, attachY - 4];
-      const u_outer_top = [u_inner_top[0] - dx, u_inner_top[1] - dy - wingOff];
-      const u_outer_bot = [u_inner_bot[0] - dx, u_inner_bot[1] - dy - wingOff];
-      ctx.beginPath(); ctx.moveTo(u_inner_top[0], u_inner_top[1]); ctx.lineTo(u_inner_bot[0], u_inner_bot[1]); ctx.lineTo(u_outer_bot[0], u_outer_bot[1]); ctx.lineTo(u_outer_top[0], u_outer_top[1]); ctx.closePath(); ctx.fill(); ctx.stroke();
-      const l_inner_top = [attachX, attachY + 4];
-      const l_inner_bot = [attachX, attachY + (wingTh/2) + 4];
-      const l_outer_top = [l_inner_top[0] - dx, l_inner_top[1] + dy + wingOff];
-      const l_outer_bot = [l_inner_bot[0] - dx, l_inner_bot[1] + dy + wingOff];
-      ctx.beginPath(); ctx.moveTo(l_inner_top[0], l_inner_top[1]); ctx.lineTo(l_inner_bot[0], l_inner_bot[1]); ctx.lineTo(l_outer_bot[0], l_outer_bot[1]); ctx.lineTo(l_outer_top[0], l_outer_top[1]); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1.5;
+      const u1 = [attachX, attachY - Math.round(wingTh/2) - 4];
+      const u2 = [attachX, attachY - 4];
+      const u3 = [u2[0] - dx, u2[1] - dy - wingOff];
+      const u4 = [u1[0] - dx, u1[1] - dy - wingOff];
+      ctx.beginPath(); ctx.moveTo(u1[0], u1[1]); ctx.lineTo(u2[0], u2[1]); ctx.lineTo(u3[0], u3[1]); ctx.lineTo(u4[0], u4[1]); ctx.closePath(); ctx.fill(); ctx.stroke();
+
+      // lower wing parallelogram (mirrored vertical)
+      const l1 = [attachX, attachY + 4];
+      const l2 = [attachX, attachY + Math.round(wingTh/2) + 4];
+      const l3 = [l2[0] - dx, l2[1] + dy + wingOff];
+      const l4 = [l1[0] - dx, l1[1] + dy + wingOff];
+      ctx.beginPath(); ctx.moveTo(l1[0], l1[1]); ctx.lineTo(l2[0], l2[1]); ctx.lineTo(l3[0], l3[1]); ctx.lineTo(l4[0], l4[1]); ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+  }
+
+  class Obstacle {
+    constructor(){
+      this.width = 22 + Math.floor(Math.random()*14); // 22..35
+      this.height = 60 + Math.floor(Math.random()*100); // 60..160
+      this.side = Math.random() < 0.5 ? 'top' : 'bottom';
+      if (this.side === 'top') {
+        this.x = WIDTH + 20;
+        this.y = 0;
+      } else {
+        this.x = WIDTH + 20;
+        this.y = HEIGHT - this.height;
+      }
+      this.speed = OBSTACLE_SPEED;
+      this.rect = { x: this.x, y: this.y, w: this.width, h: this.height };
+    }
+    update(){
+      this.x -= this.speed;
+      this.rect.x = this.x;
+    }
+    draw(ctx){
+      ctx.fillStyle = '#502A1A';
+      ctx.fillRect(this.x, this.y, this.width, this.height);
+      // decorative spikes/triangles
+      ctx.fillStyle = '#28140A';
+      if (this.side === 'top') {
+        for (let i=0;i<this.width;i+=8) {
+          ctx.beginPath();
+          ctx.moveTo(this.x + i, this.y + this.height);
+          ctx.lineTo(this.x + i + 4, this.y + this.height - 14);
+          ctx.lineTo(this.x + i + 8, this.y + this.height);
+          ctx.closePath();
+          ctx.fill();
+        }
+      } else {
+        for (let i=0;i<this.width;i+=8) {
+          ctx.beginPath();
+          ctx.moveTo(this.x + i, this.y);
+          ctx.lineTo(this.x + i + 4, this.y + 14);
+          ctx.lineTo(this.x + i + 8, this.y);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
     }
   }
 
@@ -280,13 +357,13 @@
   }
 
   // game lists
-  let flowers = [], birds = [], stingers = [];
+  let flowers = [], birds = [], stingers = [], obstacles = [];
 
   // bee instance
   let bee = new Bee();
 
   // timers + scores
-  let lastFlower = performance.now(), lastBird = performance.now(), lastTrail = performance.now();
+  let lastFlower = performance.now(), lastBird = performance.now(), lastTrail = performance.now(), lastObstacle = performance.now();
   let score = 0, flowersCollected = 0, birdsKilled = 0, lives = 3;
 
   // controls
@@ -322,8 +399,8 @@
 
   function resetGame(){
     bee = new Bee();
-    flowers = []; birds = []; stingers = []; parts = []; partPool = [];
-    lastFlower = performance.now(); lastBird = performance.now(); lastTrail = performance.now();
+    flowers = []; birds = []; stingers = []; parts = []; partPool = []; obstacles = [];
+    lastFlower = performance.now(); lastBird = performance.now(); lastTrail = performance.now(); lastObstacle = performance.now();
     score = 0; flowersCollected = 0; birdsKilled = 0; lives = 3;
     gameOver = false; recorded = false;
   }
@@ -349,9 +426,7 @@
 
     // input handling (flap)
     if (!gameOver && (keys[' '] || keys['arrowup'])) {
-      // Only trigger flap on keydown edge; we'll treat repeated press as continuous
       bee.flap();
-      // reset key to avoid repeated auto-flap (the user likely expects repeats though)
       keys[' '] = false; keys['arrowup'] = false;
     }
     if (!gameOver && keys['f']) {
@@ -367,12 +442,17 @@
     if (!gameOver && now - lastBird > BIRD_SPAWN_MS){
       birds.push(new Bird()); lastBird = now;
     }
+    // spawn obstacles
+    if (!gameOver && now - lastObstacle > SPAWN_OBSTACLE_MS){
+      obstacles.push(new Obstacle()); lastObstacle = now;
+    }
 
     // update entities
     if(!gameOver){
       bee.update(dt);
       flowers.forEach(f=>f.update());
       birds.forEach(b=>b.update(dt));
+      obstacles.forEach(o=>o.update());
       stingers.forEach(s=>s.update(dt));
     }
 
@@ -388,6 +468,17 @@
       const f=flowers[i];
       if(circleRectCollide(bee.x, bee.y, bee.r, f.rect)){
         flowers.splice(i,1); flowersCollected++; score+=1; spawnBurst(f.x,f.y,12); playTone(880,'triangle',0.12,0.18);
+      }
+    }
+    // obstacles: bee collides
+    for(let i=obstacles.length-1;i>=0;i--){
+      const ob = obstacles[i];
+      if(circleRectCollide(bee.x, bee.y, bee.r, ob.rect)){
+        obstacles.splice(i,1);
+        lives -= 1;
+        spawnHitAt(bee.x, bee.y);
+        playTone(120,'sine',0.25,0.3);
+        if(lives<=0) { gameOver = true; }
       }
     }
     // birds: bee collides
@@ -420,6 +511,7 @@
     // remove offscreen entities
     flowers = flowers.filter(f => f.x > -50);
     birds = birds.filter(b => b.x + b.w > -60);
+    obstacles = obstacles.filter(o => o.x + o.width > -60);
     const nowT = Date.now();
     stingers = stingers.filter(s => !s.expired(nowT));
 
@@ -458,7 +550,9 @@
       const cx = (t / (20 + i*10) + i*200) % (WIDTH + 200) - 100;
       ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(cx, 70 + i*20, 60, 24, 0,0,Math.PI*2); ctx.fill();
     }
-    // flowers & obstacles & birds
+
+    // draw obstacles, flowers, birds, stingers, bee, particles (order matters)
+    obstacles.forEach(o=>o.draw(ctx));
     flowers.forEach(f=>f.draw(ctx));
     birds.forEach(b=>b.draw(ctx));
     stingers.forEach(s=>s.draw(ctx));
