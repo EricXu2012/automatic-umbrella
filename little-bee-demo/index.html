@@ -222,7 +222,11 @@
       this.x = WIDTH + 20; this.y = 60 + Math.random()*(HEIGHT-120); this.speed = FLOWER_SPEED;
       this.rect = {x:this.x - this.size/2, y:this.y - this.size/2, w:this.size, h:this.size};
     }
-    update(){ this.x -= this.speed; this.rect.x = this.x - this.size/2; }
+    update(){
+      // use global gameSpeed for rolling speed
+      this.x -= this.speed * gameSpeed;
+      this.rect.x = this.x - this.size/2;
+    }
     draw(ctx){
       const cx = this.x, cy = this.y, s=this.size;
       ctx.fillStyle = '#FF69B4';
@@ -240,11 +244,17 @@
       this.w = 64 + Math.random()*28 |0;
       this.h = 34 + Math.random()*14 |0;
       this.x = WIDTH + 10; this.y = 60 + Math.random()*(HEIGHT-140);
-      this.speed = BIRD_MIN_SPEED + Math.random()*(BIRD_MAX_SPEED - BIRD_MIN_SPEED);
+      this.baseSpeed = BIRD_MIN_SPEED + Math.random()*(BIRD_MAX_SPEED - BIRD_MIN_SPEED);
+      this.speed = this.baseSpeed; // base, updated per-frame via gameSpeed
       this.wingPhase = Math.random()*Math.PI*2;
       this.rect = {x:this.x, y:this.y, w:this.w, h:this.h};
     }
-    update(dt){ this.x -= this.speed; this.wingPhase += dt*0.02; this.rect.x = this.x; this.rect.y = this.y; }
+    update(dt){
+      // apply global gameSpeed multiplier
+      this.x -= this.baseSpeed * gameSpeed;
+      this.wingPhase += dt*0.02;
+      this.rect.x = this.x; this.rect.y = this.y;
+    }
     draw(ctx){
       const bx = this.x|0, by = this.y|0, w = this.w, h = this.h;
       const cx = bx + w/2, cy = by + h/2;
@@ -315,7 +325,7 @@
       this.rect = { x: this.x, y: this.y, w: this.width, h: this.height };
     }
     update(){
-      this.x -= this.speed;
+      this.x -= this.speed * gameSpeed;
       this.rect.x = this.x;
     }
     draw(ctx){
@@ -347,7 +357,7 @@
 
   class Stinger {
     constructor(x,y){ this.x=x; this.y=y; this.vx=STINGER_SPEED; this.spawn=Date.now(); this.r=4; this.rect={x:this.x-this.r,y:this.y-this.r,w:this.r*2,h:this.r*2}; }
-    update(dt){ this.x += this.vx; this.rect.x = this.x - this.r; this.rect.y = this.y - this.r; }
+    update(dt){ this.x += this.vx * gameSpeed; this.rect.x = this.x - this.r; this.rect.y = this.y - this.r; }
     draw(ctx){
       ctx.fillStyle = '#282828';
       ctx.beginPath(); ctx.moveTo(this.x-2,this.y-3); ctx.lineTo(this.x+8,this.y); ctx.lineTo(this.x-2,this.y+3); ctx.closePath(); ctx.fill();
@@ -365,6 +375,10 @@
   // timers + scores
   let lastFlower = performance.now(), lastBird = performance.now(), lastTrail = performance.now(), lastObstacle = performance.now();
   let score = 0, flowersCollected = 0, birdsKilled = 0, lives = 3;
+
+  // game speed: increases 10% per minute
+  let startTime = performance.now();
+  let gameSpeed = 1.0;
 
   // controls
   const keys = {};
@@ -403,6 +417,9 @@
     lastFlower = performance.now(); lastBird = performance.now(); lastTrail = performance.now(); lastObstacle = performance.now();
     score = 0; flowersCollected = 0; birdsKilled = 0; lives = 3;
     gameOver = false; recorded = false;
+    // reset speed timer
+    startTime = performance.now();
+    gameSpeed = 1.0;
   }
 
   resetGame();
@@ -415,7 +432,7 @@
       <div>Flowers: ${flowersCollected}</div>
       <div>Birds killed: ${birdsKilled}</div>
       <div>Score: ${score}</div>
-      <div>Lives: ${lives}</div>
+      <div style="font-size:12px;color:#333;margin-top:4px">Speed: ${gameSpeed.toFixed(2)}x</div>
       <div class="hint">Space/Up: flap &nbsp; F: shoot &nbsp; R: restart</div>
     </div>`;
   }
@@ -423,6 +440,10 @@
   function tick(now){
     const dt = Math.min(40, now - lastTime);
     lastTime = now;
+
+    // update gameSpeed: 10% per minute multiplicative
+    const elapsedMinutes = (now - startTime) / 60000;
+    gameSpeed = Math.pow(1.1, elapsedMinutes);
 
     // input handling (flap)
     if (!gameOver && (keys[' '] || keys['arrowup'])) {
@@ -447,7 +468,7 @@
       obstacles.push(new Obstacle()); lastObstacle = now;
     }
 
-    // update entities
+    // update entities (movement uses gameSpeed)
     if(!gameOver){
       bee.update(dt);
       flowers.forEach(f=>f.update());
@@ -544,12 +565,20 @@
     // background ground and clouds
     ctx.fillStyle = BG; ctx.fillRect(0,0,WIDTH,HEIGHT);
     ctx.fillStyle = '#28A028'; ctx.fillRect(0, HEIGHT-60, WIDTH, 60);
-    // clouds
-    const t = Date.now();
-    for(let i=0;i<3;i++){
-      const cx = (t / (20 + i*10) + i*200) % (WIDTH + 200) - 100;
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(cx, 70 + i*20, 60, 24, 0,0,Math.PI*2); ctx.fill();
-    }
+   // clouds — slower, time-based; mildly affected by game speed
+   const nowMs = Date.now();
+   const elapsedSec = (nowMs - startTime) / 1000;              // seconds since start/restart
+   const baseCloudSpeed = 4;                                  // px per second (tweak this)
+   const cloudFactor = 2;  //Math.sqrt(gameSpeed);                  // mild scaling with game speed
+   for (let i = 0; i < 3; i++) {
+     // slower per-layer speed divider so farther clouds move slower
+     const layerDiv = 1 + i * 0.3;
+     const cx = ((elapsedSec * baseCloudSpeed * cloudFactor) / layerDiv + i * 200) % (WIDTH + 200) - 100;
+     ctx.fillStyle = '#fff';
+     ctx.beginPath();
+     ctx.ellipse(cx, 70 + i * 20, 60, 24, 0, 0, Math.PI * 2);
+     ctx.fill();
+   }
 
     // draw obstacles, flowers, birds, stingers, bee, particles (order matters)
     obstacles.forEach(o=>o.draw(ctx));
